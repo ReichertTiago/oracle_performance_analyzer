@@ -1,2 +1,2 @@
-# oracle_performance_analyzer
+# Oracle Performance Analyzer
 Analise de Performance de Banco de Dados Oracle 
