@@ -1,29 +1,28 @@
 package main
 
 import (
-"os/exec"
-"io"
-"log"
-"fmt"
-"strings"
-"time"
-"os"
-"path/filepath"
-"strconv"
+	"fmt"
+	"time"
+	"./utils"
 )
 
 func buildQuerys() (map[string]string, map[string]string) {
 
+	// estas query's serão executadas somente uma vez
 	querysOneTime := map[string]string{
+		"Database_Identifier":"select 'Banco de dados: '||db.name||', instancia: '|| ins.instance_name|| ', criado dia: '||db.created from v$database db, v$instance ins;",
+		"Database_Status":"select 'Status: '||ins.status||' '||db.OPEN_MODE||', iniciado desde: '|| ins.startup_time|| ', modo atual: '||db.LOG_MODE from v$database db, v$instance ins;",
+		"Tablespaces_Size":"set lines 300 pages 200 \n col SPACE_USED format a10 JUS R WRA \n col SPACE_ALLOCATED format a15 \n col TOTAL_SIZE format a10 \n col FREE_PERCENT format a12 \n col TABLESPACE_NAME format a25 \n select  RPAD('Tablespace: '||a.tablespace_name,40)||RPAD(' Utilizando: '|| round((tbs_size-a.free_space),2)||' GB',23)||RPAD(' Alocado: '||round(tbs_size,2)||' GB',20)||RPAD('Total: '||round(tbs_max_size)||' GB',17)||round(((tbs_max_size-(tbs_size-a.free_space))/tbs_max_size)*100)||'% Livre' from  (select tablespace_name, round(sum(bytes)/1024/1024/1024 ,2) as free_space from dba_free_space group by tablespace_name) a, (select tablespace_name, sum(bytes)/1024/1024/1024 as tbs_size, sum(maxbytes)/1024/1024/1024 as tbs_max_size from dba_data_files group by tablespace_name) b where a.tablespace_name(+)=b.tablespace_name;",
+		"Biggest_System_Tables":"col owner format a15 \n col segment_name format a30 \n col segment_type format a15 \n col mb format 999,999,999 \n select 'Tablespace: '||rpad(tablespace_name,7)||'  Tipo: '||rpad(segment_type,12)||rpad(owner||'.'||segment_name,30)|| mb ||' MB' from( select tablespace_name, owner, segment_name, segment_type, bytes/1024/1024 MB from dba_segments where tablespace_name in ('SYSTEM','SYS') order by bytes desc) where rownum < 11;",
 		"Buffer_Cache_Hit_Ratio_Percent" : "SELECT ROUND((1 - (phy.value / (cur.value + con.value))) * 100) FROM v$sysstat cur, v$sysstat con, v$sysstat phy WHERE cur.name = 'db block gets' AND con.name = 'consistent gets' AND phy.name = 'physical reads';",
 		"Library_Cache_Hit_Ration_Percent" : "SELECT ROUND((sum(pinhits) / sum(pins))*100) FROM v$librarycache WHERE namespace in ('SQL AREA', 'TABLE/PROCEDURE', 'BODY', 'TRIGGER');",
+
 	}
 
+	// estas query's serão executadas a cada 30 segundos durante a analise
 	querysMoreTimes := map[string]string{
-		"How_Much_Current_Locks" : "SELECT count(*) FROM gv$lock WHERE block = 1 AND request > 0;",
-
+		"How_Much_Locks" : "SELECT count(*) FROM gv$lock WHERE block = 1 AND request > 0;",
 	}
-
 	return querysOneTime, querysMoreTimes
 }
 
@@ -52,129 +51,31 @@ func main() {
 	if len(sid) == 0{
 		sid = "orcl"
 	}
-	fmt.Print("Favor informar o tempo deseja para a analise em minutos: ")
+	fmt.Print("Favor informar o tempo da analise em minutos: ")
 	fmt.Scanln(&tempoAnalise)
-
-	//user = "system"
-	//password = "oracle"
-	//sid = "reichert"
-	//tempoAnalise = 1
 
 
 	// Coletando horario de inicio e criando arquivo de log
 	start := time.Now()
-	relatorio := getFileWriter(start)
+	relatorio := utils.GetFileWriter(start)
 	defer relatorio.Close()
-	writeHeader(relatorio)
-	writeString(relatorio,"Horario inicial da Analise: "+start.Format("02/01/2006 15:04:05\n"))
+	utils.WriteHeader(relatorio)
 
+
+	utils.WriteString(relatorio,"Horario inicial da Analise: "+start.Format("02/01/2006 15:04:05\n"))
 
 	// maps e vetores com query's e resultados
 	querysOneTime, querysMoreTimes := buildQuerys()
-	resultados := map[string][]string{}
 
-
-	// Query's executadas somente uma veze durante a analise (valores estáticos) TODO
-	for k, v := range querysOneTime {
-		r := run_sqlplus(user,password,sid,v)
-		if _, err := strconv.ParseInt(r, 10, 64); err == nil {
-			if strings.Contains(k,"Percent"){
-				writeString(relatorio,k+": \t"+r+"%%")
-			}else{
-				writeString(relatorio,k+": \t"+r)
-			}
-		}else{
-			writeString(relatorio,k+"\n"+string(r))
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
+	// Querys executadas somente uma vez
+	utils.WriteString(relatorio,"\n------------------------[ Informações sobre o Banco de Dados ]------------------------\n")
+	utils.QueryOneTime(querysOneTime,user,password,sid,relatorio)
 
 
 	// Query's executadas varias vezes durante a analise (para calcular min, max e média)
-	for((time.Since(start).Minutes()) < tempoAnalise){
+	utils.WriteString(relatorio,"\n-------------------------------[ Relatório da Analise ]-------------------------------\n")
+	utils.QueryMoreTimes(querysMoreTimes,user,password,sid,relatorio,start,tempoAnalise)
 
-		for k, v := range querysMoreTimes {
-			r := run_sqlplus(user,password,sid,v)
-			resultados[k] = Extend(resultados[k], string(r))
-			time.Sleep(100 * time.Millisecond)
-		}
-		time.Sleep(10000 * time.Millisecond)
-	}
+	utils.WriteString(relatorio,"\nHorario final da Analise: "+time.Now().Format("02/01/2006 15:04:05"))
 
-	//fmt.Println(resultados)
-
-	writeString(relatorio,"\nHorario final da Analise: "+time.Now().Format("02/01/2006 15:04:05"))
-
-}
-
-func run_sqlplus(user, password, sid, query string) string {
-	const queryHeader = "set head off \n set feedback off \n set pagesize 999 \n set long 999 \n "
-
-	cmd := exec.Command("sqlplus", "-S", user+"/"+password+"@"+sid)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go func() {
-		defer stdin.Close()
-		io.WriteString(stdin, queryHeader+query)
-	}()
-
-
-	out, err := cmd.CombinedOutput()
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return strings.TrimSpace(string(out))
-}
-
-func Extend(slice []string, element string) []string {
-	n := len(slice)
-	if n == cap(slice) {
-		// Slice is full; must grow.
-		// We double its size and add 1, so if the size is zero we still grow.
-		newSlice := make([]string, len(slice), 2*len(slice)+1)
-		copy(newSlice, slice)
-		slice = newSlice
-	}
-	slice = slice[0 : n+1]
-	slice[n] = element
-	return slice
-}
-
-
-func getCurrentDirectory() string {
-	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return dir
-}
-
-func getFileWriter(start time.Time) *os.File {
-	f, err := os.Create(getCurrentDirectory()+"/LB2_Oracle_Analyzer_"+start.Format("20060102-15H04M"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return f
-}
-
-func writeHeader(relatorio *os.File){
-	writeString(relatorio,"------------------------------------------------------------------------------------")
-	writeString(relatorio,"-               LB2 Consultoria - Leading Business 2 the Next Level!               -")
-	writeString(relatorio,"-                                                                                  -")
-	writeString(relatorio,"-             Autor: Tiago M Reichert   Email: tiago.miguel@lb2.com.br             -")
-	writeString(relatorio,"-                                                                                  -")
-	writeString(relatorio,"-                      Oracle Database Performance Analyzer                        -")
-	writeString(relatorio,"------------------------------------------------------------------------------------")
-}
-
-func writeString(f *os.File, str string){
-
-	f.WriteString(strings.Replace(str, "%%", "%", -1) +"\n")
-	fmt.Printf(str+"\n")
 }
