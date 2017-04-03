@@ -14,7 +14,7 @@ func StringToFloat(numero string) float64 {
 }
 
 func FloatToString(input_num float64, precision int) string {
-	return strconv.FormatFloat(input_num, 'g', precision, 64)
+	return strconv.FormatFloat(input_num, 'f', precision, 64)
 }
 
 
