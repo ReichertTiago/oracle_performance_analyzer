@@ -56,7 +56,7 @@ func buildQuerys() (map[string]string, (map[string]string), map[string]string) {
 		"Total_Parse_Count_Per_Sec ":"select sum(case metric_name when 'Total Parse Count Per Sec' then value end) as kbytes from V$SYSMETRIC;",
 		"DBWR_Checkpoints_Per_Sec  ":"select sum(case metric_name when 'DBWR Checkpoints Per Sec' then value end) as kbytes from V$SYSMETRIC;",
 		"DB_Block_Changes_Per_Sec  ":"select sum(case metric_name when 'DB Block Changes Per Sec' then value end) as kbytes from V$SYSMETRIC;",
-		"Temp_Used_MB              ":"SELECT SUM (A.used_blocks * D.block_size)/1024/1024 as mb_used FROM v$sort_segment A, ( SELECT B.name, C.block_size, SUM (C.bytes) / 1024 / 1024 as mb_total FROM v$tablespace B, v$tempfile C WHERE B.ts#= C.ts# GROUP BY B.name, C.block_size ) D WHERE A.tablespace_name = D.name",
+		"Temp_Used_MB              ":"SELECT SUM (A.used_blocks * D.block_size)/1024/1024 as mb_used FROM v$sort_segment A, ( SELECT B.name, C.block_size, SUM (C.bytes) / 1024 / 1024 as mb_total FROM v$tablespace B, v$tempfile C WHERE B.ts#= C.ts# GROUP BY B.name, C.block_size ) D WHERE A.tablespace_name = D.name;",
 		"Temp_Used_Percent         ":"SELECT ROUND((AVG(SUM(A.used_blocks * D.block_size)/1024/1024/D.mb_total)*100)) as percent_used FROM v$sort_segment A, ( SELECT B.name, C.block_size, SUM (C.bytes) / 1024 / 1024 mb_total FROM v$tablespace B, v$tempfile C WHERE B.ts#= C.ts# GROUP BY B.name, C.block_size ) D WHERE A.tablespace_name = D.name GROUP by A.tablespace_name, D.mb_total;",
 	}
 	return querysOneTimeMoreLines, querysOneTimeOneLine, querysMoreTimes
